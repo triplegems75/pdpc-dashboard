@@ -1597,11 +1597,15 @@ function renderRepeatOffenders() {
       const pen  = a.penalty
         ? `<span class="pen-val">$${Number(a.penalty).toLocaleString()}</span>`
         : `<span class="pen-val none">–</span>`;
-      return `<div class="rpt-row" style="cursor:pointer" onclick="openDetail(all.find(x=>x.id==='${esc(d.id)}'))">
+      const pdfLink = d.pdfUrl
+        ? `<a href="${esc(d.pdfUrl)}" target="_blank" onclick="event.stopPropagation()" class="lnk lnk-pdf" style="font-size:10px;padding:2px 6px">📄 PDF</a>`
+        : `<a href="https://www.pdpc.gov.sg${esc(d.href)}" target="_blank" onclick="event.stopPropagation()" class="lnk lnk-pdpc" style="font-size:10px;padding:2px 6px">🔗 PDPC</a>`;
+      return `<div class="rpt-row" style="cursor:pointer;grid-template-columns:110px 1fr 1fr 110px 70px" onclick="openDetail(all.find(x=>x.id==='${esc(d.id)}'))">
         <span class="date">${esc(d.date)}</span>
         <span class="secs">${secs}</span>
         <span class="obls">${esc(obls)}</span>
         <span class="pen">${pen}</span>
+        <span>${pdfLink}</span>
       </div>`;
     }).join('');
 
@@ -1614,8 +1618,8 @@ function renderRepeatOffenders() {
         </div>
       </div>
       <div class="rpt-body">
-        <div class="rpt-row" style="background:var(--bg3);font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;cursor:default">
-          <span>Date</span><span>PDPA Sections</span><span>Obligations</span><span style="text-align:right">Penalty</span>
+        <div class="rpt-row" style="background:var(--bg3);font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;cursor:default;grid-template-columns:110px 1fr 1fr 110px 70px">
+          <span>Date</span><span>PDPA Sections</span><span>Obligations</span><span style="text-align:right">Penalty</span><span>Link</span>
         </div>
         ${rows}
       </div>
