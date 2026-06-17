@@ -10,7 +10,30 @@
     (function(){
       var ts = Date.now();
       var s1 = document.createElement('script'); s1.src = 'pdpc_data.js?v=' + ts; document.head.appendChild(s1);
-      var s2 = document.createElement('script'); s2.src = 'pdpc_analysis.js?v=' + ts; s2.onerror = function(){}; document.head.appendChild(s2);
+      var s2 = document.createElement('script'); s2.src = 'pdpc_analysis.js?v=' + ts;
+      s2.onerror = function(){};
+      s2.onload = function() {
+        if (typeof PRELOADED_ANALYSIS === 'undefined') return;
+        var cache = {};
+        try { cache = JSON.parse(localStorage.getItem('pdpc_analysis_v1') || '{}'); } catch {}
+        var merged = 0;
+        for (var id in PRELOADED_ANALYSIS) {
+          if (!cache[id]) { cache[id] = PRELOADED_ANALYSIS[id]; merged++; }
+        }
+        if (merged > 0) {
+          try { localStorage.setItem('pdpc_analysis_v1', JSON.stringify(cache)); } catch {}
+          // If init already ran, patch the live analysisCache and refresh
+          if (typeof analysisCache !== 'undefined') {
+            for (var id2 in PRELOADED_ANALYSIS) {
+              if (!analysisCache[id2]) analysisCache[id2] = PRELOADED_ANALYSIS[id2];
+            }
+            if (typeof updateStats === 'function') updateStats();
+            if (typeof renderClauses === 'function' && typeof activeTab !== 'undefined' && activeTab === 'cls') renderClauses();
+            if (typeof renderRepeatOffenders === 'function' && activeTab === 'rpt') renderRepeatOffenders();
+          }
+        }
+      };
+      document.head.appendChild(s2);
     })();
   </script>
   <style>
