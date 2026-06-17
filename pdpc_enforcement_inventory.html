@@ -1,0 +1,1621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDPC Enforcement Decisions Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- Pre-loaded data — cache-busted so browser always reads the latest file from disk -->
+  <script>
+    (function(){
+      var ts = Date.now();
+      var s1 = document.createElement('script'); s1.src = 'pdpc_data.js?v=' + ts; document.head.appendChild(s1);
+      var s2 = document.createElement('script'); s2.src = 'pdpc_analysis.js?v=' + ts; s2.onerror = function(){}; document.head.appendChild(s2);
+    })();
+  </script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:      #0f1217;
+      --bg2:     #161b27;
+      --bg3:     #1c2333;
+      --border:  #2a3348;
+      --accent:  #3b82f6;
+      --accent2: #1d4ed8;
+      --text:    #d1d5db;
+      --dim:     #6b7280;
+      --bright:  #f9fafb;
+      --cd:      #3b82f6;
+      --vu:      #8b5cf6;
+      --ok:      #10b981;
+      --warn:    #f59e0b;
+      --err:     #ef4444;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+           background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; }
+
+    /* ── Header ── */
+    .hdr { background: var(--bg2); border-bottom: 1px solid var(--border);
+           padding: 14px 24px; display: flex; align-items: center;
+           justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+    .hdr-left h1 { font-size: 17px; font-weight: 700; color: var(--bright); }
+    .hdr-left p  { font-size: 11px; color: var(--dim); margin-top: 2px; }
+    .hdr-stats { display: flex; gap: 10px; }
+    .stat { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
+            padding: 6px 14px; text-align: center; min-width: 72px; }
+    .stat .n { font-size: 20px; font-weight: 700; color: var(--accent); line-height: 1.2; }
+    .stat .l { font-size: 10px; color: var(--dim); white-space: nowrap; }
+
+    /* ── Tabs ── */
+    .tabs { background: var(--bg2); border-bottom: 1px solid var(--border);
+            padding: 0 24px; display: flex; }
+    .tab { padding: 11px 18px; cursor: pointer; border-bottom: 2px solid transparent;
+           color: var(--dim); font-size: 13px; font-weight: 500; transition: all .15s; }
+    .tab:hover { color: var(--text); }
+    .tab.on { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* ── Main ── */
+    .main { padding: 18px 24px; }
+    .panel { display: none; }
+    .panel.on { display: block; }
+
+    /* ── Filters ── */
+    .filters { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+               padding: 12px 16px; margin-bottom: 14px;
+               display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .search-wrap { flex: 1; min-width: 180px; position: relative; }
+    .search-wrap input { width: 100%; background: var(--bg3); border: 1px solid var(--border);
+                         border-radius: 6px; padding: 7px 10px 7px 30px;
+                         color: var(--text); font-size: 13px; outline: none; transition: border-color .15s; }
+    .search-wrap input:focus { border-color: var(--accent); }
+    .search-wrap .si { position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+                       color: var(--dim); font-size: 13px; pointer-events: none; }
+    .fg { display: flex; align-items: center; gap: 6px; }
+    .fg label { font-size: 11px; color: var(--dim); white-space: nowrap; }
+    .fg select { background: var(--bg3); border: 1px solid var(--border); border-radius: 6px;
+                 padding: 6px 8px; color: var(--text); font-size: 13px; outline: none; cursor: pointer; }
+    .fg select:focus { border-color: var(--accent); }
+    .btn { padding: 7px 13px; border-radius: 6px; border: none; cursor: pointer;
+           font-size: 13px; font-weight: 500; transition: all .15s; }
+    .btn-p { background: var(--accent); color: #fff; }
+    .btn-p:hover { background: var(--accent2); }
+    .btn-s { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+    .btn-s:hover { border-color: var(--accent); color: var(--accent); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+    /* ── Status ── */
+    .status { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+              padding: 9px 14px; margin-bottom: 12px;
+              display: flex; align-items: center; gap: 10px; font-size: 12px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dot-ok   { background: var(--ok); }
+    .dot-warn { background: var(--warn); }
+    .dot-load { background: var(--warn); animation: blink 1s infinite; }
+    .dot-err  { background: var(--err); }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .pbar { flex: 1; background: var(--bg3); border-radius: 4px; height: 4px; overflow: hidden; }
+    .pfill { height: 100%; background: var(--accent); border-radius: 4px; transition: width .3s; }
+
+    /* ── Table ── */
+    .tbl-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .tbl-info { padding: 9px 14px; font-size: 12px; color: var(--dim); border-bottom: 1px solid var(--border);
+                display: flex; justify-content: space-between; align-items: center; }
+    .tbl-scroll { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    thead { background: var(--bg3); }
+    th { padding: 9px 12px; text-align: left; font-size: 11px; font-weight: 600; color: var(--dim);
+         text-transform: uppercase; letter-spacing: .5px; white-space: nowrap;
+         cursor: pointer; user-select: none; border-bottom: 1px solid var(--border); }
+    th:hover { color: var(--text); }
+    td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tbody tr { cursor: pointer; transition: background .1s; }
+    tbody tr:hover { background: var(--bg3); }
+    .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px;
+             font-size: 11px; font-weight: 500; white-space: nowrap; }
+    .bcd { background: rgba(59,130,246,.15); color: #93c5fd; }
+    .bvu { background: rgba(139,92,246,.15); color: #c4b5fd; }
+    .org { font-weight: 500; color: var(--bright); max-width: 260px; overflow: hidden;
+           text-overflow: ellipsis; white-space: nowrap; }
+    .dc { color: var(--dim); white-space: nowrap; font-size: 12px; }
+    .lnk-cell { display: flex; gap: 5px; align-items: center; }
+    .lnk { display: inline-flex; align-items: center; gap: 3px; padding: 3px 8px;
+            border-radius: 4px; font-size: 11px; text-decoration: none; border: 1px solid; transition: all .15s; }
+    .lnk-pdpc { border-color: var(--border); color: var(--dim); background: var(--bg3); }
+    .lnk-pdpc:hover { border-color: var(--accent); color: var(--accent); }
+    .lnk-pdf  { border-color: rgba(239,68,68,.4); color: #fca5a5; background: rgba(239,68,68,.1); }
+    .lnk-pdf:hover { border-color: var(--err); color: var(--err); }
+    .no-pdf { color: var(--dim); font-size: 11px; }
+    .empty { padding: 40px; text-align: center; color: var(--dim); }
+    .loading { padding: 60px; text-align: center; color: var(--dim); }
+    .spin { width: 30px; height: 30px; border: 3px solid var(--border); border-top-color: var(--accent);
+            border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Pagination ── */
+    .pagi { display: flex; align-items: center; justify-content: center; gap: 6px;
+            padding: 11px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+    .pbtn { padding: 4px 10px; border-radius: 5px; border: 1px solid var(--border);
+            background: var(--bg3); color: var(--text); cursor: pointer; font-size: 12px; }
+    .pbtn:hover:not(:disabled):not(.pa) { border-color: var(--accent); color: var(--accent); }
+    .pbtn.pa { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .pbtn:disabled { opacity: .4; cursor: not-allowed; }
+    .pinfo { font-size: 12px; color: var(--dim); }
+
+    /* ── Charts ── */
+    .charts-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+    @media (max-width: 700px) { .charts-2 { grid-template-columns: 1fr; } }
+    .cc { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+    .cc h3 { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 12px; }
+    .cc-h { position: relative; }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3a4568; }
+
+    /* ── Detail Panel ── */
+    .dpanel-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 200;
+                      opacity: 0; pointer-events: none; transition: opacity .2s; }
+    .dpanel-overlay.open { opacity: 1; pointer-events: all; }
+    .dpanel { position: fixed; top: 0; right: -700px; width: min(700px, 100vw); height: 100vh;
+              background: var(--bg2); border-left: 1px solid var(--border);
+              overflow-y: auto; z-index: 201; transition: right .25s cubic-bezier(.4,0,.2,1); display: flex; flex-direction: column; }
+    .dpanel.open { right: 0; }
+    .dpanel-hdr { padding: 16px 20px; border-bottom: 1px solid var(--border);
+                  display: flex; align-items: flex-start; gap: 12px; position: sticky; top: 0; background: var(--bg2); z-index: 1; }
+    .dpanel-hdr .back { background: var(--bg3); border: 1px solid var(--border); border-radius: 6px;
+                        padding: 6px 10px; cursor: pointer; color: var(--text); font-size: 13px; flex-shrink: 0; }
+    .dpanel-hdr .back:hover { border-color: var(--accent); color: var(--accent); }
+    .dpanel-hdr .info { flex: 1; min-width: 0; }
+    .dpanel-hdr .info h2 { font-size: 15px; font-weight: 700; color: var(--bright); line-height: 1.3; }
+    .dpanel-hdr .info .meta { font-size: 11px; color: var(--dim); margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; }
+    .dpanel-links { display: flex; gap: 6px; flex-shrink: 0; }
+    .dpanel-body { padding: 20px; flex: 1; }
+    .dpanel-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+    .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+    @media (max-width: 500px) { .field-grid { grid-template-columns: 1fr; } }
+    .field-full { grid-column: 1 / -1; }
+    .fcard { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+    .fcard .flbl { font-size: 10px; font-weight: 600; color: var(--dim); text-transform: uppercase;
+                   letter-spacing: .6px; margin-bottom: 5px; }
+    .fcard .fval { font-size: 13px; color: var(--text); line-height: 1.5; }
+    .fcard .fval.bright { color: var(--bright); font-weight: 500; }
+    .fcard .fval ul { padding-left: 16px; margin: 0; }
+    .fcard .fval ul li { margin-bottom: 2px; }
+    .penalty-val { font-size: 18px; font-weight: 700; color: var(--ok); }
+    .tag { display: inline-flex; background: rgba(59,130,246,.15); color: #93c5fd;
+           border-radius: 4px; padding: 2px 7px; font-size: 11px; margin: 2px 2px 2px 0; }
+    .analyze-box { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px;
+                   padding: 20px; text-align: center; }
+    .analyze-box p { color: var(--dim); font-size: 13px; margin-bottom: 14px; line-height: 1.5; }
+    .api-input-row { display: flex; gap: 8px; margin-bottom: 12px; }
+    .api-input-row input { flex: 1; background: var(--bg); border: 1px solid var(--border);
+                           border-radius: 6px; padding: 8px 10px; color: var(--text); font-size: 13px; outline: none; }
+    .api-input-row input:focus { border-color: var(--accent); }
+    .dp-loading { text-align: center; padding: 40px; }
+    .dp-loading .spin { margin: 0 auto 12px; }
+    .dp-err { background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3);
+              border-radius: 8px; padding: 14px; color: #fca5a5; font-size: 13px; }
+
+    /* ── Settings Modal ── */
+    .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 300;
+                display: none; align-items: center; justify-content: center; }
+    .modal-bg.open { display: flex; }
+    .modal { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px;
+             padding: 24px; width: min(420px, 95vw); }
+    .modal h3 { font-size: 15px; font-weight: 700; color: var(--bright); margin-bottom: 14px; }
+    .modal label { font-size: 12px; color: var(--dim); display: block; margin-bottom: 5px; }
+    .modal input { width: 100%; background: var(--bg3); border: 1px solid var(--border);
+                   border-radius: 6px; padding: 8px 10px; color: var(--text); font-size: 13px;
+                   outline: none; margin-bottom: 12px; font-family: monospace; }
+    .modal input:focus { border-color: var(--accent); }
+    .modal .mfooter { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+    .modal p { font-size: 12px; color: var(--dim); line-height: 1.5; margin-bottom: 12px; }
+
+    /* ── Clauses Tab ── */
+    .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+    @media (max-width: 700px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } }
+    .kpi-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; text-align: center; }
+    .kpi-n { font-size: 28px; font-weight: 700; color: var(--accent); line-height: 1.2; }
+    .kpi-n.green { color: var(--ok); }
+    .kpi-l { font-size: 12px; color: var(--dim); margin-top: 4px; }
+    .cls-notice { background: rgba(59,130,246,.08); border: 1px solid rgba(59,130,246,.2);
+                  border-radius: 8px; padding: 12px 16px; font-size: 12px; color: var(--dim);
+                  margin-bottom: 16px; line-height: 1.6; }
+    .cls-tbl-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+                    overflow: hidden; margin-top: 16px; }
+    .cls-tbl-wrap table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .cls-tbl-wrap thead { background: var(--bg3); }
+    .cls-tbl-wrap th { padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 600;
+                       color: var(--dim); text-transform: uppercase; letter-spacing: .5px;
+                       white-space: nowrap; border-bottom: 1px solid var(--border); }
+    .cls-tbl-wrap td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .cls-tbl-wrap tr:last-child td { border-bottom: none; }
+    .cls-tbl-wrap tbody tr:hover { background: var(--bg3); }
+    .sec-tag { display: inline-flex; background: rgba(59,130,246,.15); color: #93c5fd;
+               border-radius: 4px; padding: 1px 6px; font-size: 10px; margin: 1px; white-space: nowrap; }
+    .obl-tag { display: inline-flex; background: rgba(16,185,129,.15); color: #6ee7b7;
+               border-radius: 4px; padding: 1px 6px; font-size: 10px; margin: 1px; white-space: nowrap; }
+    .pen-val { color: var(--ok); font-weight: 600; white-space: nowrap; }
+
+    /* ── Top Penalties chart section ── */
+    .cc-full { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    .cc-full h3 { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 12px; }
+
+    /* ── Repeat Offenders tab ── */
+    .rpt-grid { display: grid; gap: 14px; margin-bottom: 16px; }
+    .rpt-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .rpt-hdr { background: var(--bg3); padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
+    .rpt-org { font-size: 14px; font-weight: 600; color: var(--bright); }
+    .rpt-count { background: rgba(239,68,68,.15); color: #fca5a5; border-radius: 999px; padding: 2px 10px; font-size: 11px; font-weight: 600; }
+    .rpt-body { padding: 0; }
+    .rpt-row { display: grid; grid-template-columns: 110px 1fr 1fr 110px; gap: 10px; align-items: center; padding: 9px 16px; border-bottom: 1px solid var(--border); font-size: 12px; }
+    .rpt-row:last-child { border-bottom: none; }
+    .rpt-row:hover { background: var(--bg3); }
+    .rpt-row .date { color: var(--dim); }
+    .rpt-row .secs { display: flex; flex-wrap: wrap; gap: 2px; }
+    .rpt-row .obls { color: var(--dim); font-size: 11px; }
+    .rpt-row .pen { color: var(--ok); font-weight: 600; text-align: right; }
+    .rpt-row .pen.none { color: var(--dim); }
+    .rpt-empty { padding: 40px; text-align: center; color: var(--dim); }
+    .rpt-kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════ HEADER ═══════════════ -->
+<div class="hdr">
+  <div class="hdr-left">
+    <h1>🔏 PDPC Enforcement Decisions</h1>
+    <p>Personal Data Protection Commission Singapore · pdpc.gov.sg</p>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <div class="hdr-stats">
+      <div class="stat"><div class="n" id="s-total">–</div><div class="l">Total</div></div>
+      <div class="stat"><div class="n" id="s-cd">–</div><div class="l">CD</div></div>
+      <div class="stat"><div class="n" id="s-vu">–</div><div class="l">VU</div></div>
+      <div class="stat"><div class="n" id="s-pdf">–</div><div class="l">PDFs Linked</div></div>
+      <div class="stat"><div class="n" id="s-analyzed">–</div><div class="l">Analysed</div></div>
+    </div>
+    <button class="btn btn-s" onclick="openSettings()" title="Settings / API Key" style="font-size:16px;padding:7px 10px">⚙️</button>
+  </div>
+</div>
+
+<!-- ═══════════════ DETAIL PANEL ═══════════════ -->
+<div class="dpanel-overlay" id="dp-overlay" onclick="closeDetail()"></div>
+<div class="dpanel" id="dpanel">
+  <div class="dpanel-hdr">
+    <button class="back" onclick="closeDetail()">← Back</button>
+    <div class="info">
+      <h2 id="dp-title">–</h2>
+      <div class="meta">
+        <span id="dp-date"></span>
+        <span id="dp-type-badge"></span>
+        <span id="dp-citation" style="color:var(--accent)"></span>
+      </div>
+    </div>
+    <div class="dpanel-links" id="dp-links"></div>
+  </div>
+  <div class="dpanel-body" id="dp-body"></div>
+</div>
+
+<!-- ═══════════════ SETTINGS MODAL ═══════════════ -->
+<div class="modal-bg" id="settings-modal" onclick="if(event.target===this)closeSettings()">
+  <div class="modal">
+    <h3>⚙️ Settings</h3>
+    <p>Enter your Anthropic API key to enable per-decision deep analysis. The key is stored only in your browser's localStorage and never sent anywhere except api.anthropic.com.</p>
+    <label>Anthropic API Key</label>
+    <input type="password" id="api-key-input" placeholder="sk-ant-…" autocomplete="off">
+    <label>Model</label>
+    <select id="model-select" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;margin-bottom:12px">
+      <option value="claude-haiku-4-5-20251001">claude-haiku-4-5 (fastest · cheapest)</option>
+      <option value="claude-sonnet-4-6">claude-sonnet-4-6 (more accurate)</option>
+    </select>
+    <div style="margin-top:4px;padding-top:12px;border-top:1px solid var(--border)">
+      <p style="color:var(--warn);margin-bottom:8px">⚠ If the Clauses &amp; Obligations tab shows 0 cases, your browser may have stale analysis data. Click below to rebuild from <code>pdpc_analysis.js</code>.</p>
+      <button class="btn btn-s" style="width:100%;border-color:rgba(245,158,11,.4);color:var(--warn)" onclick="resetAnalysisCache()">🔄 Reset &amp; Rebuild Analysis Cache</button>
+    </div>
+    <div class="mfooter" style="margin-top:12px">
+      <button class="btn btn-s" onclick="closeSettings()">Cancel</button>
+      <button class="btn btn-p" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ TABS ═══════════════ -->
+<div class="tabs">
+  <div class="tab on" id="tab-cd"  onclick="switchTab('cd')">📋 Commission's Decisions</div>
+  <div class="tab"    id="tab-vu"  onclick="switchTab('vu')">📝 Voluntary Undertakings</div>
+  <div class="tab"    id="tab-cls" onclick="switchTab('cls')">⚖️ Clauses &amp; Obligations</div>
+  <div class="tab"    id="tab-sts" onclick="switchTab('sts')">📊 Statistics</div>
+  <div class="tab"    id="tab-rpt" onclick="switchTab('rpt')">🔁 Repeat Offenders</div>
+</div>
+
+<!-- ═══════════════ MAIN ═══════════════ -->
+<div class="main">
+
+  <!-- INVENTORY PANEL (shared by CD + VU tabs) -->
+  <div class="panel on" id="panel-inv">
+    <div class="filters">
+      <div class="search-wrap">
+        <span class="si">🔍</span>
+        <input type="text" id="q" placeholder="Search Commission's Decisions…" oninput="onSearch(this.value)">
+      </div>
+      <div class="fg">
+        <label>Year</label>
+        <select id="fyear" onchange="onFilter()">
+          <option value="All">All Years</option>
+        </select>
+      </div>
+      <button class="btn btn-s" onclick="refreshData()">↺ Refresh</button>
+      <button class="btn btn-p" id="btn-pdf" style="display:none" onclick="startPdfFetch()">📎 Load PDF Links</button>
+    </div>
+
+    <div id="status-area"></div>
+
+    <div class="tbl-wrap" id="tbl-wrap">
+      <div class="loading"><div class="spin"></div><div>Loading enforcement decisions…</div></div>
+    </div>
+  </div>
+
+  <!-- CLAUSES PANEL -->
+  <div class="panel" id="panel-cls">
+    <div class="kpi-row">
+      <div class="kpi-card"><div class="kpi-n" id="cls-total">–</div><div class="kpi-l">CD Cases Total</div></div>
+      <div class="kpi-card"><div class="kpi-n" id="cls-analysed">–</div><div class="kpi-l">Cases Analysed</div></div>
+      <div class="kpi-card"><div class="kpi-n" id="cls-pct">–</div><div class="kpi-l">Coverage</div></div>
+      <div class="kpi-card"><div class="kpi-n green" id="cls-penalty">–</div><div class="kpi-l">Total Penalties (SGD)</div></div>
+    </div>
+    <div id="cls-notice" class="cls-notice" style="display:none"></div>
+    <div class="charts-2">
+      <div class="cc">
+        <h3>PDPA Sections Breached — by case count</h3>
+        <div class="cc-h" style="height:320px"><canvas id="c-sections"></canvas></div>
+      </div>
+      <div class="cc">
+        <h3>Obligations Breached — by case count</h3>
+        <div class="cc-h" style="height:320px"><canvas id="c-obligations"></canvas></div>
+      </div>
+    </div>
+    <div class="cc" style="margin-bottom:16px">
+      <h3>Commission's Decisions by Industry — top 15 (analysed cases)</h3>
+      <div class="cc-h" style="height:300px"><canvas id="c-industry"></canvas></div>
+    </div>
+    <div class="cc-full" style="margin-bottom:16px">
+      <h3>Top Financial Penalties — ranked by amount (SGD)</h3>
+      <div style="position:relative;height:380px"><canvas id="c-penalties"></canvas></div>
+    </div>
+
+    <div class="cls-tbl-wrap">
+      <div style="padding:9px 14px;font-size:12px;color:var(--dim);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <span id="cls-tbl-info">Analysed Commission's Decisions</span>
+        <span style="font-size:11px">Sorted newest first</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th style="min-width:180px">Organisation</th>
+            <th style="min-width:120px">PDPA Sections</th>
+            <th style="min-width:180px">Obligations Breached</th>
+            <th style="width:100px">Penalty</th>
+            <th style="min-width:140px">Industry</th>
+            <th style="width:100px">Date</th>
+            <th style="width:50px"></th>
+          </tr></thead>
+          <tbody id="cls-table-body">
+            <tr><td colspan="7" class="empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATS PANEL -->
+  <div class="panel" id="panel-sts">
+    <div class="charts-2">
+      <div class="cc">
+        <h3>Decisions by Year</h3>
+        <div class="cc-h" style="height:240px"><canvas id="cy"></canvas></div>
+      </div>
+      <div class="cc">
+        <h3>Type Breakdown</h3>
+        <div class="cc-h" style="height:240px"><canvas id="ct"></canvas></div>
+      </div>
+    </div>
+    <div class="cc" style="margin-bottom:16px">
+      <h3>CD vs VU by Year</h3>
+      <div class="cc-h" style="height:260px"><canvas id="cst"></canvas></div>
+    </div>
+    <div class="cc">
+      <h3>Decisions by Category / Topic</h3>
+      <div class="cc-h" style="height:360px"><canvas id="ctop"></canvas></div>
+    </div>
+  </div>
+
+  <!-- REPEAT OFFENDERS PANEL -->
+  <div class="panel" id="panel-rpt">
+    <div class="rpt-kpi-row">
+      <div class="kpi-card"><div class="kpi-n" id="rpt-orgs">–</div><div class="kpi-l">Repeat Offenders</div></div>
+      <div class="kpi-card"><div class="kpi-n" id="rpt-cases">–</div><div class="kpi-l">Total Cases Involved</div></div>
+      <div class="kpi-card"><div class="kpi-n green" id="rpt-penalty">–</div><div class="kpi-l">Total Penalties (SGD)</div></div>
+    </div>
+    <div id="rpt-content"><div class="rpt-empty">Loading…</div></div>
+  </div>
+
+</div><!-- /main -->
+
+<script>
+// ══════════════════════════════════════════════════════════════════
+// CONSTANTS
+// ══════════════════════════════════════════════════════════════════
+const LISTING_URL =
+  'https://www.pdpc.gov.sg/api/listing-api' +
+  '?type=All' +
+  '&year=2026%2C2025%2C2024%2C2023%2C2022%2CYear+2021+and+older' +
+  '&sort=latest' +
+  '&page=1' +
+  '&listingtype=enforcement_decisions' +
+  '&itemsperpage=500' +
+  '&slug=organisations%2Fregulations-decisions%2Fenforcement-decisions' +
+  '&pathname=%2Forganisations%2Fregulations-decisions%2Fenforcement-decisions';
+
+const BASE       = 'https://www.pdpc.gov.sg';
+const CK_LIST    = 'pdpc_v3_listings';
+const CK_DETAIL  = 'pdpc_v3_details';
+const TTL        = 4 * 3600 * 1000;   // 4 h cache for listings
+const PAGE_SZ    = 50;
+const PROXIES    = [
+  u => u,
+  u => 'https://corsproxy.io/?' + encodeURIComponent(u),
+  u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+];
+
+// ══════════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════════
+let all       = [];         // processed decision objects
+let filtered  = [];         // after search/filter/sort
+let details   = {};         // id → { pdfUrl, ts }
+let page      = 1;
+let activeTab = 'cd';
+let sf        = 'date';     // sort field
+let sd        = 'desc';     // sort direction
+let ftype     = 'CD';       // driven by active tab: 'CD' or 'VU'
+let fyear     = 'All';
+let qq        = '';
+let bgOn      = false;
+let proxyIdx  = -1;
+let cYear, cType, cStack, cTopic;            // Statistics tab charts
+let cSections, cObligations, cIndustry, cPenalties; // Clauses tab charts
+
+// ══════════════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════════════
+async function init() {
+  loadDetails();
+  loadAnalysisCache();
+  // Merge pre-computed analysis from pdpc_analysis.js (generated by analyse_all.py)
+  if (typeof PRELOADED_ANALYSIS !== 'undefined') {
+    let merged = 0;
+    for (const [id, data] of Object.entries(PRELOADED_ANALYSIS)) {
+      if (!analysisCache[id]) { analysisCache[id] = data; merged++; }
+    }
+    if (merged > 0) { saveAnalysisCache(); }
+  }
+  // Check for offline pre-loaded data (from pdpc_data.js sidecar)
+  if (typeof PRELOADED_DATA !== 'undefined' && PRELOADED_DATA.length) {
+    buildFromPreloaded(PRELOADED_DATA);
+    render();
+    const analysedCount = Object.keys(analysisCache).length;
+    const analysedNote = analysedCount > 0 ? ` · <span style="color:var(--ok)">${analysedCount} pre-analysed</span>` : '';
+    setStatus('ok', `✓ Loaded ${all.length} decisions (pre-loaded${analysedNote} · <a href="#" onclick="refreshData();return false" style="color:var(--accent)">fetch latest</a>)`);
+    checkPdfBtn();
+    return;
+  }
+  const cached = loadListingsCache();
+  if (cached) {
+    buildAll(cached);
+    render();
+    setStatus('ok', `Loaded ${all.length} decisions from cache · <a href="#" onclick="refreshData();return false" style="color:var(--accent)">Fetch latest</a>`);
+  } else {
+    await fetchListings();
+  }
+  checkPdfBtn();
+}
+
+// Build from offline preloaded array: [slug, date, uuid_or_null]
+// Type and title derived from slug at runtime — no API needed
+function buildFromPreloaded(data) {
+  const PREFIX = '/organisations/regulations-decisions/enforcement-decisions/';
+  all = data.map(([slug, date, uuid]) => {
+    const isVU = slug.startsWith('voluntary-undertaking-by-');
+    const type = isVU ? 'VU' : 'CD';
+    // Prettify slug → display title
+    const title = slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    return {
+      id: slug,
+      title,
+      topic: isVU ? 'Voluntary Undertakings' : "Commission's Decisions",
+      href: PREFIX + slug,
+      date,
+      yr: getYear(date),
+      type,
+      pdfUrl: uuid ? 'https://www.pdpc.gov.sg/assets/' + uuid : null,
+    };
+  });
+  const years = [...new Set(all.map(d => d.yr).filter(Boolean))].sort((a,b)=>b-a);
+  const sel = document.getElementById('fyear');
+  sel.innerHTML = '<option value="All">All Years</option>'
+    + years.map(y => `<option value="${y}">${y}</option>`).join('');
+  applyFilters();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CACHE
+// ══════════════════════════════════════════════════════════════════
+function loadListingsCache() {
+  try {
+    const o = JSON.parse(localStorage.getItem(CK_LIST) || 'null');
+    if (!o || Date.now() - o.ts > TTL) return null;
+    return o.data;
+  } catch { return null; }
+}
+function saveListingsCache(data) {
+  try { localStorage.setItem(CK_LIST, JSON.stringify({ ts: Date.now(), data })); } catch {}
+}
+function loadDetails() {
+  try { details = JSON.parse(localStorage.getItem(CK_DETAIL) || '{}'); } catch { details = {}; }
+}
+function saveDetails() {
+  try { localStorage.setItem(CK_DETAIL, JSON.stringify(details)); } catch {}
+}
+
+// ══════════════════════════════════════════════════════════════════
+// FETCH LISTINGS
+// ══════════════════════════════════════════════════════════════════
+async function fetchListings() {
+  setStatus('load', 'Connecting to PDPC API…');
+  let data = null, lastErr = '';
+  for (let i = 0; i < PROXIES.length; i++) {
+    const pu = PROXIES[i](LISTING_URL);
+    try {
+      setStatus('load', i === 0 ? 'Fetching from PDPC…' : `Trying proxy ${i}…`);
+      const r = await fetch(pu, { headers: { Accept: 'application/json' } });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      if (!Array.isArray(j.data)) throw new Error('Unexpected shape');
+      data = j.data; proxyIdx = i; break;
+    } catch (e) { lastErr = e.message; }
+  }
+  if (!data) {
+    // Fall back to pre-loaded data if available
+    if (typeof PRELOADED_DATA !== 'undefined' && PRELOADED_DATA.length) {
+      buildFromPreloaded(PRELOADED_DATA);
+      render();
+      const isFileProt = location.protocol === 'file:';
+      const hint = isFileProt
+        ? ' · <span style="color:var(--warn)">Open via <strong>Start Dashboard.bat</strong> for live refresh</span>'
+        : '';
+      setStatus('warn', `⚠ Live fetch failed — showing pre-loaded data (${all.length} decisions)${hint}`);
+      checkPdfBtn();
+      return;
+    }
+    setStatus('err', `⚠ Could not fetch decisions (${lastErr}). Make sure <strong>pdpc_data.js</strong> is in the same folder as this file, or open via <strong>Start Dashboard.bat</strong> for live data.`);
+    document.getElementById('tbl-wrap').innerHTML = '<div class="empty">📁 Place <strong>pdpc_data.js</strong> in the same folder as this HTML file, then reload. Or use <strong>Start Dashboard.bat</strong> to open the dashboard via localhost.</div>';
+    return;
+  }
+  saveListingsCache(data);
+  buildAll(data);
+  render();
+  setStatus('ok', `✓ Loaded ${all.length} decisions from PDPC.`);
+  checkPdfBtn();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// BUILD / PROCESS
+// ══════════════════════════════════════════════════════════════════
+function buildAll(raw) {
+  all = raw.map(item => {
+    const type = guessType(item);
+    const yr   = getYear(item.date);
+    const det  = details[item.id] || {};
+    return {
+      id:     item.id,
+      title:  (item.title || '').trim(),
+      topic:  (item.topic || '').trim(),
+      href:   item.href || '',
+      date:   item.date || '',
+      yr,
+      type,
+      pdfUrl: det.pdfUrl || null,
+    };
+  });
+
+  // Populate year dropdown
+  const years = [...new Set(all.map(d => d.yr).filter(Boolean))].sort((a,b)=>b-a);
+  const sel = document.getElementById('fyear');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="All">All Years</option>'
+    + years.map(y => `<option value="${y}">${y}</option>`).join('');
+  if (years.includes(+cur)) sel.value = cur;
+
+  applyFilters();
+}
+
+function guessType(item) {
+  const h = (item.href  || '').toLowerCase();
+  const t = (item.topic || '').toLowerCase();
+  if (h.includes('voluntary') || t.includes('voluntary')) return 'VU';
+  return 'CD';
+}
+
+function getYear(d) {
+  if (!d) return null;
+  const m = d.match(/\b(20\d{2})\b/);
+  return m ? +m[1] : null;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// FILTER + SORT
+// ══════════════════════════════════════════════════════════════════
+function applyFilters() {
+  const q = qq.toLowerCase();
+  filtered = all.filter(d => {
+    // ftype is always 'CD' or 'VU' (driven by active tab)
+    if (d.type !== ftype) return false;
+    if (fyear !== 'All' && String(d.yr) !== String(fyear)) return false;
+    if (q && !d.title.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  filtered.sort((a, b) => {
+    if (sf === 'title') {
+      const r = a.title.localeCompare(b.title);
+      return sd === 'asc' ? r : -r;
+    }
+    if (sf === 'type') {
+      const r = a.type.localeCompare(b.type);
+      return sd === 'asc' ? r : -r;
+    }
+    if (sf === 'date') {
+      const av = dateVal(a.date), bv = dateVal(b.date);
+      return sd === 'asc' ? av - bv : bv - av;
+    }
+    if (sf === 'year') {
+      const av = a.yr || 0, bv = b.yr || 0;
+      return sd === 'asc' ? av - bv : bv - av;
+    }
+    return 0;
+  });
+  page = 1;
+}
+
+function dateVal(s) {
+  if (!s) return 0;
+  const MO = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+  const m = s.match(/(\d{1,2})\s+(\w{3})\s+(\d{4})/);
+  if (m) return new Date(+m[3], MO[m[2]] ?? 0, +m[1]).getTime();
+  return new Date(s).getTime() || 0;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// RENDER
+// ══════════════════════════════════════════════════════════════════
+function render() {
+  updateStats();
+  if (activeTab === 'cd' || activeTab === 'vu') renderTable();
+  if (activeTab === 'cls') renderClauses();
+  if (activeTab === 'sts') renderStats();
+  if (activeTab === 'rpt') renderRepeatOffenders();
+}
+
+function updateStats() {
+  const cd       = all.filter(d => d.type === 'CD').length;
+  const vu       = all.filter(d => d.type === 'VU').length;
+  const pdfs     = all.filter(d => d.pdfUrl).length;
+  const analysed = Object.keys(analysisCache).length;
+  document.getElementById('s-total').textContent    = all.length || '–';
+  document.getElementById('s-cd').textContent       = cd         || '–';
+  document.getElementById('s-vu').textContent       = vu         || '–';
+  document.getElementById('s-pdf').textContent      = pdfs       || '–';
+  document.getElementById('s-analyzed').textContent = analysed   || '–';
+}
+
+function renderTable() {
+  const wrap = document.getElementById('tbl-wrap');
+  if (!all.length) return;
+
+  const from  = (page - 1) * PAGE_SZ;
+  const slice = filtered.slice(from, from + PAGE_SZ);
+  const total = filtered.length;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SZ));
+
+  const arr = f => sf === f ? (sd === 'asc' ? ' ▲' : ' ▼') : '';
+
+  const rows = slice.map((d, i) => {
+    const url  = d.href ? BASE + d.href : '#';
+    const pdf  = d.pdfUrl
+      ? `<a class="lnk lnk-pdf" href="${d.pdfUrl}" target="_blank" onclick="event.stopPropagation()">📄 PDF</a>`
+      : `<span class="no-pdf">–</span>`;
+    const badge = d.type === 'VU'
+      ? '<span class="badge bvu">Voluntary</span>'
+      : '<span class="badge bcd">Commission</span>';
+    const hasAnalysis = !!analysisCache[d.id];
+    const fidx = from + i;   // index into filtered[]
+    return `<tr style="cursor:pointer" onclick="openDetail(${fidx})">
+      <td style="color:var(--dim);font-size:11px;width:36px">${from + i + 1}</td>
+      <td><div class="org" title="${esc(d.title)}">${esc(d.title)}${hasAnalysis ? ' <span style="color:var(--ok);font-size:10px">✓</span>' : ''}</div></td>
+      <td>${badge}</td>
+      <td class="dc">${esc(d.date)}</td>
+      <td class="dc">${d.yr || '–'}</td>
+      <td class="lnk-cell">
+        <a class="lnk lnk-pdpc" href="${esc(url)}" target="_blank" onclick="event.stopPropagation()">🔗 PDPC</a>
+        ${pdf}
+      </td>
+    </tr>`;
+  }).join('');
+
+  const typeTotal = all.filter(d => d.type === ftype).length;
+  const filterNote = total < typeTotal ? ` (filtered from ${typeTotal})` : '';
+  const typeLabel  = ftype === 'CD' ? "Commission's Decisions" : 'Voluntary Undertakings';
+
+  wrap.innerHTML = `
+    <div class="tbl-info">
+      <span>Showing ${from + 1}–${Math.min(from + PAGE_SZ, total)} of ${total} ${typeLabel}${filterNote}</span>
+      <span style="color:var(--dim);font-size:11px">Click any row to view details &amp; analyse</span>
+    </div>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr>
+          <th style="width:36px">#</th>
+          <th onclick="setSort('title')" style="min-width:200px">Organisation${arr('title')}</th>
+          <th onclick="setSort('type')"  style="width:120px">Type${arr('type')}</th>
+          <th onclick="setSort('date')"  style="width:120px">Date${arr('date')}</th>
+          <th onclick="setSort('year')"  style="width:62px">Year${arr('year')}</th>
+          <th style="width:140px">Links</th>
+        </tr></thead>
+        <tbody>${rows || '<tr><td colspan="6" class="empty">No decisions match your filters.</td></tr>'}</tbody>
+      </table>
+    </div>
+    ${pages > 1 ? buildPagi(pages) : ''}
+  `;
+}
+
+function buildPagi(pages) {
+  let html = `<div class="pagi">
+    <button class="pbtn" onclick="goPage(${page - 1})" ${page === 1 ? 'disabled' : ''}>‹ Prev</button>`;
+  let prev = -1;
+  for (let p = 1; p <= pages; p++) {
+    const near = p === 1 || p === pages || Math.abs(p - page) <= 2;
+    if (near) {
+      if (prev > 0 && p - prev > 1) html += '<span style="color:var(--dim);padding:0 3px">…</span>';
+      html += `<button class="pbtn ${p === page ? 'pa' : ''}" onclick="goPage(${p})">${p}</button>`;
+      prev = p;
+    }
+  }
+  html += `<button class="pbtn" onclick="goPage(${page + 1})" ${page === pages ? 'disabled' : ''}>Next ›</button>
+    <span class="pinfo">Page ${page} of ${pages}</span></div>`;
+  return html;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// STATS / CHARTS
+// ══════════════════════════════════════════════════════════════════
+function renderStats() {
+  if (!all.length) return;
+
+  // By year
+  const yMap = {};
+  const yCd  = {};
+  const yVu  = {};
+  all.forEach(d => {
+    if (!d.yr) return;
+    yMap[d.yr] = (yMap[d.yr] || 0) + 1;
+    if (d.type === 'CD') yCd[d.yr] = (yCd[d.yr] || 0) + 1;
+    else                  yVu[d.yr] = (yVu[d.yr] || 0) + 1;
+  });
+  const years = Object.keys(yMap).sort();
+
+  // By type
+  const cdN = all.filter(d => d.type === 'CD').length;
+  const vuN = all.filter(d => d.type === 'VU').length;
+
+  // By topic
+  const tMap = {};
+  all.forEach(d => {
+    let lbl = d.topic || 'Unclassified';
+    lbl = lbl.replace(/-/g, ' ').replace(/\b./g, c => c.toUpperCase());
+    tMap[lbl] = (tMap[lbl] || 0) + 1;
+  });
+  const tops = Object.entries(tMap).sort((a,b) => b[1]-a[1]).slice(0, 20);
+
+  const DEF = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: '#9ca3af', font: { size: 12 } } } },
+  };
+  const AXES = {
+    x: { ticks: { color: '#9ca3af' }, grid: { color: '#2a3348' } },
+    y: { ticks: { color: '#9ca3af', stepSize: 1 }, grid: { color: '#2a3348' } },
+  };
+
+  // Year chart
+  if (cYear) cYear.destroy();
+  cYear = new Chart('cy', {
+    type: 'bar',
+    data: {
+      labels: years,
+      datasets: [{
+        label: 'Decisions', data: years.map(y => yMap[y]),
+        backgroundColor: '#3b82f6aa', borderColor: '#3b82f6', borderWidth: 1, borderRadius: 4,
+      }]
+    },
+    options: { ...DEF, scales: AXES }
+  });
+
+  // Type doughnut
+  if (cType) cType.destroy();
+  cType = new Chart('ct', {
+    type: 'doughnut',
+    data: {
+      labels: ["Commission's Decisions", "Voluntary Undertakings"],
+      datasets: [{
+        data: [cdN, vuN],
+        backgroundColor: ['#3b82f6bb', '#8b5cf6bb'],
+        borderColor: ['#3b82f6', '#8b5cf6'], borderWidth: 2,
+      }]
+    },
+    options: { ...DEF }
+  });
+
+  // Stacked year × type
+  if (cStack) cStack.destroy();
+  cStack = new Chart('cst', {
+    type: 'bar',
+    data: {
+      labels: years,
+      datasets: [
+        { label: "Commission's Decision", data: years.map(y => yCd[y]||0), backgroundColor: '#3b82f6bb', borderColor: '#3b82f6', borderWidth: 1, borderRadius: 3 },
+        { label: "Voluntary Undertaking",  data: years.map(y => yVu[y]||0), backgroundColor: '#8b5cf6bb', borderColor: '#8b5cf6', borderWidth: 1, borderRadius: 3 },
+      ]
+    },
+    options: { ...DEF, scales: { ...AXES, x: { ...AXES.x, stacked: true }, y: { ...AXES.y, stacked: true } } }
+  });
+
+  // Topic horizontal bar
+  if (cTopic) cTopic.destroy();
+  cTopic = new Chart('ctop', {
+    type: 'bar',
+    data: {
+      labels: tops.map(e => e[0]),
+      datasets: [{
+        label: 'Decisions', data: tops.map(e => e[1]),
+        backgroundColor: '#8b5cf6aa', borderColor: '#8b5cf6', borderWidth: 1, borderRadius: 3,
+      }]
+    },
+    options: {
+      ...DEF,
+      indexAxis: 'y',
+      scales: {
+        x: { ticks: { color: '#9ca3af', stepSize: 1 }, grid: { color: '#2a3348' } },
+        y: { ticks: { color: '#9ca3af', font: { size: 11 } }, grid: { color: '#2a3348' } },
+      }
+    }
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════
+// STATUS
+// ══════════════════════════════════════════════════════════════════
+function setStatus(type, msg) {
+  const dot  = { ok: 'dot-ok', warn: 'dot-warn', load: 'dot-load', err: 'dot-err' }[type] || 'dot-ok';
+  document.getElementById('status-area').innerHTML =
+    `<div class="status"><div class="dot ${dot}"></div><span>${msg}</span></div>`;
+}
+
+function setProgress(done, total, msg) {
+  const pct = total > 0 ? Math.round(done / total * 100) : 0;
+  document.getElementById('status-area').innerHTML = `<div class="status">
+    <div class="dot dot-load"></div>
+    <span>${msg} (${done}/${total})</span>
+    <div class="pbar"><div class="pfill" style="width:${pct}%"></div></div>
+    <span style="font-size:11px;white-space:nowrap">${pct}%</span>
+    <button class="btn btn-s" style="padding:3px 8px;font-size:11px" onclick="stopBg()">■ Stop</button>
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PDF BACKGROUND FETCH
+// ══════════════════════════════════════════════════════════════════
+function checkPdfBtn() {
+  const missing = all.filter(d => !d.pdfUrl).length;
+  const btn = document.getElementById('btn-pdf');
+  if (missing > 0 && !bgOn) {
+    btn.style.display = '';
+    btn.textContent = `📎 Load PDF Links (${missing} pending)`;
+  } else {
+    btn.style.display = 'none';
+  }
+}
+
+async function startPdfFetch() {
+  if (bgOn) return;
+  bgOn = true;
+  document.getElementById('btn-pdf').style.display = 'none';
+
+  const todo  = all.filter(d => !d.pdfUrl);
+  const total = todo.length;
+  let done    = 0;
+
+  for (let i = 0; i < todo.length && bgOn; i += 5) {
+    const batch = todo.slice(i, i + 5);
+    await Promise.all(batch.map(async d => {
+      const html = await proxyFetch(BASE + d.href);
+      if (html) {
+        const pu = extractPdf(html);
+        details[d.id] = { pdfUrl: pu, ts: Date.now() };
+        d.pdfUrl = pu;
+      }
+      done++;
+    }));
+    setProgress(done, total, 'Fetching PDF links');
+    renderTable();
+    updateStats();
+    saveDetails();
+    if (i + 5 < todo.length) await sleep(600);
+  }
+
+  bgOn = false;
+  saveDetails();
+  render();
+  const found = all.filter(d => d.pdfUrl).length;
+  setStatus('ok', `✓ Done. ${found} PDF links found across ${all.length} decisions.`);
+  checkPdfBtn();
+}
+
+function stopBg() {
+  bgOn = false;
+  const done = all.filter(d => d.pdfUrl).length;
+  setStatus('ok', `Stopped. ${done} PDF links cached so far. Resume with "Load PDF Links".`);
+  checkPdfBtn();
+}
+
+async function proxyFetch(url) {
+  const order = proxyIdx >= 0
+    ? [proxyIdx, ...[...Array(PROXIES.length).keys()].filter(i => i !== proxyIdx)]
+    : [...Array(PROXIES.length).keys()];
+  for (const i of order) {
+    try {
+      const r = await fetch(PROXIES[i](url));
+      if (!r.ok) continue;
+      const t = await r.text();
+      if (t.length > 200) { proxyIdx = i; return t; }
+    } catch {}
+  }
+  return null;
+}
+
+function extractPdf(html) {
+  const re = /\/assets\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/g;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const pre = html.substring(Math.max(0, m.index - 20), m.index);
+    if (pre.includes('href')) return BASE + '/assets/' + m[1];
+  }
+  return null;
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ══════════════════════════════════════════════════════════════════
+// UI EVENTS
+// ══════════════════════════════════════════════════════════════════
+function switchTab(t) {
+  activeTab = t;
+  document.querySelectorAll('.tab').forEach(el => el.classList.remove('on'));
+  document.getElementById('tab-' + t).classList.add('on');
+  document.querySelectorAll('.panel').forEach(el => el.classList.remove('on'));
+
+  if (t === 'cd') {
+    ftype = 'CD';
+    qq = ''; document.getElementById('q').value = '';
+    document.getElementById('q').placeholder = "Search Commission's Decisions…";
+    document.getElementById('panel-inv').classList.add('on');
+    applyFilters(); renderTable();
+  } else if (t === 'vu') {
+    ftype = 'VU';
+    qq = ''; document.getElementById('q').value = '';
+    document.getElementById('q').placeholder = 'Search Voluntary Undertakings…';
+    document.getElementById('panel-inv').classList.add('on');
+    applyFilters(); renderTable();
+  } else if (t === 'cls') {
+    document.getElementById('panel-cls').classList.add('on');
+    renderClauses();
+  } else if (t === 'sts') {
+    document.getElementById('panel-sts').classList.add('on');
+    renderStats();
+  } else if (t === 'rpt') {
+    document.getElementById('panel-rpt').classList.add('on');
+    renderRepeatOffenders();
+  }
+}
+
+function onSearch(v) {
+  qq = v;
+  applyFilters();
+  if (activeTab === 'cd' || activeTab === 'vu') renderTable();
+}
+
+function onFilter() {
+  fyear = document.getElementById('fyear').value;
+  applyFilters();
+  renderTable();
+}
+
+function setSort(f) {
+  if (sf === f) sd = sd === 'asc' ? 'desc' : 'asc';
+  else { sf = f; sd = 'desc'; }
+  applyFilters();
+  renderTable();
+}
+
+function goPage(p) {
+  const max = Math.ceil(filtered.length / PAGE_SZ);
+  if (p < 1 || p > max) return;
+  page = p;
+  renderTable();
+  window.scrollTo(0, 0);
+}
+
+function openUrl(u) { if (u && u !== '#') window.open(u, '_blank'); }
+
+function refreshData() {
+  localStorage.removeItem(CK_LIST);
+  fetchListings();
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SETTINGS / API KEY
+// ══════════════════════════════════════════════════════════════════
+function openSettings() {
+  document.getElementById('api-key-input').value = localStorage.getItem('pdpc_apikey') || '';
+  document.getElementById('model-select').value  = localStorage.getItem('pdpc_model') || 'claude-haiku-4-5-20251001';
+  document.getElementById('settings-modal').classList.add('open');
+}
+function closeSettings() { document.getElementById('settings-modal').classList.remove('open'); }
+function saveSettings() {
+  const k = document.getElementById('api-key-input').value.trim();
+  const m = document.getElementById('model-select').value;
+  if (k) localStorage.setItem('pdpc_apikey', k); else localStorage.removeItem('pdpc_apikey');
+  localStorage.setItem('pdpc_model', m);
+  closeSettings();
+  alert('Settings saved.');
+}
+
+function resetAnalysisCache() {
+  if (!confirm('This will clear the stored analysis cache and rebuild it from pdpc_analysis.js.\n\nAny analyses done via browser clicks that are NOT in pdpc_analysis.js will be lost.\n\nProceed?')) return;
+  localStorage.removeItem(CK_ANALYSIS);
+  analysisCache = {};
+  // Re-merge from PRELOADED_ANALYSIS (the .js file)
+  if (typeof PRELOADED_ANALYSIS !== 'undefined') {
+    for (const [id, data] of Object.entries(PRELOADED_ANALYSIS)) {
+      analysisCache[id] = data;
+    }
+    saveAnalysisCache();
+  }
+  closeSettings();
+  updateStats();
+  alert(`Done. Analysis cache rebuilt: ${Object.keys(analysisCache).length} entries loaded from pdpc_analysis.js.\n\nSwitch to the Clauses & Obligations tab to see results.`);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// DETAIL PANEL
+// ══════════════════════════════════════════════════════════════════
+const CK_ANALYSIS = 'pdpc_analysis_v1';
+let analysisCache = {};
+
+function loadAnalysisCache() {
+  try { analysisCache = JSON.parse(localStorage.getItem(CK_ANALYSIS) || '{}'); } catch { analysisCache = {}; }
+}
+function saveAnalysisCache() {
+  try { localStorage.setItem(CK_ANALYSIS, JSON.stringify(analysisCache)); } catch {}
+}
+
+function openDetail(idx) {
+  const d = (typeof idx === 'number') ? filtered[idx] : idx;
+  if (!d) { console.warn('openDetail: no item at', idx); return; }
+  // Header info
+  const prettyTitle = d.title.replace(/^Breach Of /i,'Breach of ')
+    .replace(/^Voluntary Undertaking By /i,'Voluntary Undertaking by ')
+    .replace(/\bAnd\b/g,'and').replace(/\bOf\b/g,'of').replace(/\bThe\b/g,'the')
+    .replace(/\bBy\b/g,'by').replace(/\bIn\b/g,'in').replace(/\bA\b(?=\s)/g,'a');
+  document.getElementById('dp-title').textContent = prettyTitle;
+  document.getElementById('dp-date').textContent  = d.date;
+  document.getElementById('dp-type-badge').innerHTML = d.type === 'VU'
+    ? '<span class="badge bvu">Voluntary Undertaking</span>'
+    : '<span class="badge bcd">Commission\'s Decision</span>';
+  const cached = analysisCache[d.id];
+  document.getElementById('dp-citation').textContent = cached?.citation || '';
+  document.getElementById('dp-links').innerHTML = `
+    <a class="lnk lnk-pdpc" href="https://www.pdpc.gov.sg${d.href}" target="_blank">🔗 PDPC</a>
+    ${d.pdfUrl ? `<a class="lnk lnk-pdf" href="${d.pdfUrl}" target="_blank">📄 PDF</a>` : ''}
+  `;
+  // Body
+  renderDetailBody(d, cached);
+  // Open panel
+  document.getElementById('dpanel').classList.add('open');
+  document.getElementById('dp-overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeDetail() {
+  document.getElementById('dpanel').classList.remove('open');
+  document.getElementById('dp-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function renderDetailBody(d, data) {
+  const body = document.getElementById('dp-body');
+  if (!data) {
+    // Show analyze prompt
+    const apiKey = localStorage.getItem('pdpc_apikey');
+    const keyHtml = apiKey ? '' : `
+      <div class="api-input-row">
+        <input type="password" id="inline-key" placeholder="sk-ant-… (or save in ⚙️ Settings)" autocomplete="off">
+      </div>`;
+    body.innerHTML = `
+      <div class="analyze-box">
+        <p>Click <strong>Analyse Decision</strong> to extract detailed information from this decision using Claude AI.<br>
+        Results are cached in your browser — each decision is analysed only once.</p>
+        ${keyHtml}
+        <button class="btn btn-p" onclick="runAnalysis('${d.id}')" style="width:100%">
+          🔍 Analyse Decision
+        </button>
+      </div>`;
+  } else {
+    body.innerHTML = renderFields(data);
+  }
+}
+
+function renderFields(data) {
+  const tag  = v => `<span class="tag">${esc(v)}</span>`;
+  const list = v => Array.isArray(v) && v.length
+    ? `<ul>${v.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>`
+    : (v || '<span style="color:var(--dim)">—</span>');
+  const val  = v => v ? esc(String(v)) : '<span style="color:var(--dim)">—</span>';
+
+  return `<div class="field-grid">
+    <div class="fcard"><div class="flbl">Organisation</div><div class="fval bright">${val(data.organisation)}</div></div>
+    <div class="fcard"><div class="flbl">Industry / Sector</div><div class="fval bright">${val(data.industry)}</div></div>
+    <div class="fcard"><div class="flbl">Case Number</div><div class="fval">${val(data.case_number)}</div></div>
+    <div class="fcard"><div class="flbl">Citation</div><div class="fval">${val(data.citation)}</div></div>
+    <div class="fcard"><div class="flbl">Decision Date</div><div class="fval">${val(data.decision_date)}</div></div>
+    <div class="fcard"><div class="flbl">Individuals Affected</div><div class="fval bright">${val(data.individuals_affected)}</div></div>
+    <div class="fcard field-full"><div class="flbl">Overview</div><div class="fval">${val(data.overview)}</div></div>
+    <div class="fcard"><div class="flbl">PDPA Sections Breached</div><div class="fval">
+      ${Array.isArray(data.pdpa_sections) ? data.pdpa_sections.map(tag).join('') : val(data.pdpa_sections)}
+    </div></div>
+    <div class="fcard"><div class="flbl">Obligations Breached</div><div class="fval">
+      ${Array.isArray(data.obligations) ? data.obligations.map(tag).join('') : val(data.obligations)}
+    </div></div>
+    <div class="fcard field-full"><div class="flbl">Root Cause</div><div class="fval">${val(data.root_cause)}</div></div>
+    <div class="fcard field-full"><div class="flbl">Outcome</div><div class="fval">${val(data.outcome)}</div></div>
+    <div class="fcard"><div class="flbl">Penalty (SGD)</div><div class="fval">
+      ${data.penalty ? `<span class="penalty-val">$${Number(data.penalty).toLocaleString()}</span>` : '<span style="color:var(--dim)">None / N/A</span>'}
+    </div></div>
+    <div class="fcard"><div class="flbl">Mitigating Factors</div><div class="fval">${list(data.mitigating)}</div></div>
+    <div class="fcard"><div class="flbl">Aggravating Factors</div><div class="fval">${list(data.aggravating)}</div></div>
+  </div>
+  <div style="text-align:right;margin-top:8px">
+    <button class="btn btn-s" onclick="reAnalyse('${data._id}')" style="font-size:11px">↺ Re-analyse</button>
+  </div>`;
+}
+
+function reAnalyse(id) {
+  delete analysisCache[id];
+  saveAnalysisCache();
+  const d = all.find(x => x.id === id);
+  if (d) { renderDetailBody(d, null); updateStats(); }
+}
+
+// ── Claude API call ──────────────────────────────────────────────
+const EXTRACT_PROMPT = `You are a legal analyst specialising in Singapore's Personal Data Protection Act.
+Read this PDPC enforcement decision and extract the following as a single JSON object (no markdown, no explanation):
+{
+  "organisation": "Full legal name of the organisation",
+  "case_number":  "Case number e.g. DP-2406-C2514",
+  "citation":     "Citation e.g. [2025] SGPDPC 2",
+  "decision_date":"Date of decision e.g. 07 April 2025",
+  "industry":     "Industry / sector of the organisation",
+  "overview":     "2-3 sentence summary of what happened and why it matters",
+  "pdpa_sections": ["s.24", "s.11"],
+  "obligations":  ["Protection Obligation","Accountability Obligation"],
+  "individuals_affected": "Number as a string e.g. 45000, or null",
+  "root_cause":   "1-2 sentence root cause",
+  "outcome":      "Plain-language outcome (directions, warnings, etc.)",
+  "penalty":      12500,
+  "mitigating":   ["Cooperative during investigation","First breach"],
+  "aggravating":  ["Large number of individuals affected"]
+}`;
+
+async function runAnalysis(id) {
+  const d = all.find(x => x.id === id);
+  if (!d) return;
+  const apiKey = (document.getElementById('inline-key')?.value.trim()) || localStorage.getItem('pdpc_apikey');
+  if (!apiKey) { alert('Please enter an Anthropic API key (or save one in ⚙️ Settings).'); return; }
+  if (apiKey) localStorage.setItem('pdpc_apikey', apiKey);
+
+  const model = localStorage.getItem('pdpc_model') || 'claude-haiku-4-5-20251001';
+  document.getElementById('dp-body').innerHTML = '<div class="dp-loading"><div class="spin"></div><div>Analysing with Claude AI…</div></div>';
+
+  try {
+    let content;
+    if (d.pdfUrl) {
+      // Use PDF directly — Anthropic servers fetch it
+      content = [
+        { type: 'document', source: { type: 'url', url: d.pdfUrl } },
+        { type: 'text', text: EXTRACT_PROMPT }
+      ];
+    } else {
+      // Fetch page text via CORS proxy and use as plain text
+      const pageUrl = 'https://www.pdpc.gov.sg' + d.href;
+      let pageText = '';
+      for (const proxy of [u=>u, u=>'https://corsproxy.io/?'+encodeURIComponent(u)]) {
+        try {
+          const r = await fetch(proxy(pageUrl));
+          if (r.ok) { pageText = await r.text(); break; }
+        } catch {}
+      }
+      // Strip HTML tags for a cleaner input
+      const tmp = document.createElement('div');
+      tmp.innerHTML = pageText;
+      const clean = (tmp.innerText || tmp.textContent || '').slice(0, 12000);
+      content = [{ type: 'text', text: EXTRACT_PROMPT + '\n\nDecision text:\n' + clean }];
+    }
+
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-client': 'true'
+      },
+      body: JSON.stringify({ model, max_tokens: 1024, messages: [{ role: 'user', content }] })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(()=>({error:{message:resp.statusText}}));
+      throw new Error(err.error?.message || resp.statusText);
+    }
+
+    const msg = await resp.json();
+    const raw = msg.content?.[0]?.text || '';
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('No JSON in response: ' + raw.slice(0, 200));
+    const extracted = JSON.parse(jsonMatch[0]);
+    extracted._id = id;
+
+    analysisCache[id] = extracted;
+    saveAnalysisCache();
+
+    // Update citation in header
+    document.getElementById('dp-citation').textContent = extracted.citation || '';
+    document.getElementById('dp-body').innerHTML = renderFields(extracted);
+    updateStats();
+
+  } catch (e) {
+    const isFileFetch = e.message === 'Failed to fetch' && location.protocol === 'file:';
+    const hint = isFileFetch
+      ? `<div style="margin-top:10px;font-size:12px;color:var(--dim);line-height:1.6">
+          <strong style="color:var(--text)">Cause:</strong> Browsers block API calls when opening the file directly (<code>file://</code>).<br>
+          <strong style="color:var(--text)">Fix:</strong> Double-click <strong>Start Dashboard.bat</strong> in your PDPC folder, then use the dashboard at
+          <code>http://localhost:8765/pdpc_enforcement_inventory.html</code> instead.
+        </div>`
+      : '';
+    document.getElementById('dp-body').innerHTML = `
+      <div class="dp-err">⚠ Analysis failed: ${esc(e.message)}
+        ${hint}
+        <br><br>
+        <button class="btn btn-s" onclick="runAnalysis('${id}')">Retry</button>
+      </div>`;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CLAUSES & OBLIGATIONS TAB
+// ══════════════════════════════════════════════════════════════════
+function renderClauses() {
+  const cdAll      = all.filter(d => d.type === 'CD');
+  const cdAnalysed = cdAll.filter(d => !!analysisCache[d.id]);
+  const noticeEl   = document.getElementById('cls-notice');
+
+  const totalPenalty = cdAnalysed.reduce((sum, d) => {
+    const p = analysisCache[d.id]?.penalty;
+    return sum + (p ? Number(p) : 0);
+  }, 0);
+
+  document.getElementById('cls-total').textContent    = cdAll.length || '–';
+  document.getElementById('cls-analysed').textContent = cdAnalysed.length || '–';
+  document.getElementById('cls-pct').textContent      = cdAll.length > 0
+    ? Math.round(cdAnalysed.length / cdAll.length * 100) + '%' : '0%';
+  document.getElementById('cls-penalty').textContent  = totalPenalty > 0
+    ? '$' + Number(totalPenalty).toLocaleString() : '–';
+
+  if (cdAnalysed.length === 0) {
+    noticeEl.style.display = '';
+    noticeEl.innerHTML = `<strong>No analysed decisions yet.</strong> Switch to the 📋 Commission's Decisions tab,
+      click on any case, and run "Analyse Decision" to extract PDPA sections and obligations.
+      Once analysed, return here to see the aggregate view. You can also run <strong>Run Analyser.bat</strong>
+      to batch-analyse all cases at once.`;
+    document.getElementById('cls-tbl-info').textContent = 'No data — run analysis first';
+    document.getElementById('cls-table-body').innerHTML =
+      '<tr><td colspan="7" class="empty">No analysed decisions. See the notice above.</td></tr>';
+    return;
+  }
+  noticeEl.style.display = 'none';
+
+  // Aggregate counts
+  const secMap = {};
+  const oblMap = {};
+  const indMap = {};
+
+  cdAnalysed.forEach(d => {
+    const a = analysisCache[d.id];
+    if (Array.isArray(a.pdpa_sections)) {
+      a.pdpa_sections.forEach(s => { const k = s.trim(); if (k) secMap[k] = (secMap[k]||0)+1; });
+    }
+    if (Array.isArray(a.obligations)) {
+      a.obligations.forEach(o => { const k = o.trim(); if (k) oblMap[k] = (oblMap[k]||0)+1; });
+    }
+    if (a.industry) {
+      const k = a.industry.trim();
+      if (k) indMap[k] = (indMap[k]||0)+1;
+    }
+  });
+
+  const secSorted = Object.entries(secMap).sort((a,b)=>b[1]-a[1]);
+  const oblSorted = Object.entries(oblMap).sort((a,b)=>b[1]-a[1]);
+  const indSorted = Object.entries(indMap).sort((a,b)=>b[1]-a[1]).slice(0,15);
+
+  const DEF = {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false }, tooltip: {
+      callbacks: { label: ctx => ` ${ctx.raw} case${ctx.raw === 1 ? '' : 's'}` }
+    }}
+  };
+  const makeAxes = () => ({
+    x: { ticks: { color: '#9ca3af', stepSize: 1 }, grid: { color: '#2a3348' } },
+    y: { ticks: { color: '#9ca3af', font: { size: 11 } }, grid: { color: '#2a3348' } },
+  });
+
+  // PDPA Sections chart
+  if (cSections) cSections.destroy();
+  cSections = new Chart('c-sections', {
+    type: 'bar',
+    data: {
+      labels: secSorted.map(e=>e[0]),
+      datasets: [{ label:'Cases', data: secSorted.map(e=>e[1]),
+        backgroundColor:'#3b82f6aa', borderColor:'#3b82f6', borderWidth:1, borderRadius:3 }]
+    },
+    options: { ...DEF, indexAxis:'y', scales: makeAxes() }
+  });
+
+  // Obligations chart
+  if (cObligations) cObligations.destroy();
+  cObligations = new Chart('c-obligations', {
+    type: 'bar',
+    data: {
+      labels: oblSorted.map(e=>e[0]),
+      datasets: [{ label:'Cases', data: oblSorted.map(e=>e[1]),
+        backgroundColor:'#10b981aa', borderColor:'#10b981', borderWidth:1, borderRadius:3 }]
+    },
+    options: { ...DEF, indexAxis:'y', scales: makeAxes() }
+  });
+
+  // Industry chart
+  if (cIndustry) cIndustry.destroy();
+  cIndustry = new Chart('c-industry', {
+    type: 'bar',
+    data: {
+      labels: indSorted.map(e=>e[0]),
+      datasets: [{ label:'Cases', data: indSorted.map(e=>e[1]),
+        backgroundColor:'#f59e0baa', borderColor:'#f59e0b', borderWidth:1, borderRadius:3 }]
+    },
+    options: { ...DEF, indexAxis:'y', scales: makeAxes() }
+  });
+
+  // Top Penalties chart (top 20 by amount)
+  const penCases = cdAnalysed
+    .filter(d => analysisCache[d.id]?.penalty > 0)
+    .sort((a,b) => Number(analysisCache[b.id].penalty) - Number(analysisCache[a.id].penalty))
+    .slice(0, 20);
+
+  if (cPenalties) cPenalties.destroy();
+  if (penCases.length > 0) {
+    cPenalties = new Chart('c-penalties', {
+      type: 'bar',
+      data: {
+        labels: penCases.map(d => {
+          const org = analysisCache[d.id]?.organisation || d.title;
+          return org.length > 40 ? org.slice(0, 38) + '…' : org;
+        }),
+        datasets: [{
+          label: 'Penalty (SGD)',
+          data: penCases.map(d => Number(analysisCache[d.id].penalty)),
+          backgroundColor: penCases.map((_, i) => i === 0 ? '#ef4444bb' : i < 3 ? '#f59e0bbb' : '#3b82f6bb'),
+          borderColor:     penCases.map((_, i) => i === 0 ? '#ef4444'   : i < 3 ? '#f59e0b'   : '#3b82f6'),
+          borderWidth: 1, borderRadius: 3,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        indexAxis: 'y',
+        onClick: (evt, elements) => {
+          if (elements.length > 0) {
+            const d = penCases[elements[0].index];
+            const fidx = filtered.findIndex(x => x.id === d.id);
+            if (fidx >= 0) openDetail(filtered[fidx]);
+            else openDetail(d);
+          }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: ctx => ` SGD $${Number(ctx.raw).toLocaleString()}` } }
+        },
+        scales: {
+          x: { ticks: { color: '#9ca3af', callback: v => '$' + (v>=1000000 ? (v/1000000).toFixed(1)+'M' : v>=1000 ? (v/1000).toFixed(0)+'k' : v) }, grid: { color: '#2a3348' } },
+          y: { ticks: { color: '#9ca3af', font: { size: 11 } }, grid: { color: '#2a3348' } },
+        }
+      }
+    });
+  }
+
+  // Render table
+  document.getElementById('cls-tbl-info').textContent =
+    `${cdAnalysed.length} analysed Commission's Decisions`;
+
+  const rows = [...cdAnalysed]
+    .sort((a,b) => dateVal(b.date) - dateVal(a.date))
+    .map(d => {
+      const a = analysisCache[d.id];
+      const org     = esc(a.organisation || d.title);
+      const secs    = Array.isArray(a.pdpa_sections)
+        ? a.pdpa_sections.map(s=>`<span class="sec-tag">${esc(s)}</span>`).join('')
+        : (a.pdpa_sections ? `<span class="sec-tag">${esc(String(a.pdpa_sections))}</span>` : '–');
+      const obls    = Array.isArray(a.obligations)
+        ? a.obligations.map(o=>`<span class="obl-tag">${esc(o)}</span>`).join('')
+        : (a.obligations ? `<span class="obl-tag">${esc(String(a.obligations))}</span>` : '–');
+      const penalty = a.penalty
+        ? `<span class="pen-val">$${Number(a.penalty).toLocaleString()}</span>` : '–';
+      const industry = esc(a.industry || '–');
+      return `<tr>
+        <td style="font-weight:500;color:var(--bright);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${org}">${org}</td>
+        <td>${secs}</td>
+        <td>${obls}</td>
+        <td>${penalty}</td>
+        <td style="color:var(--dim)">${industry}</td>
+        <td style="color:var(--dim);white-space:nowrap">${esc(d.date)}</td>
+        <td><a class="lnk lnk-pdpc" href="https://www.pdpc.gov.sg${d.href}" target="_blank" style="font-size:10px;padding:2px 6px">🔗</a></td>
+      </tr>`;
+    }).join('');
+
+  document.getElementById('cls-table-body').innerHTML =
+    rows || '<tr><td colspan="7" class="empty">No data.</td></tr>';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// REPEAT OFFENDERS TAB
+// ══════════════════════════════════════════════════════════════════
+function renderRepeatOffenders() {
+  const cdAnalysed = all.filter(d => d.type === 'CD' && !!analysisCache[d.id]);
+
+  if (cdAnalysed.length === 0) {
+    document.getElementById('rpt-orgs').textContent    = '–';
+    document.getElementById('rpt-cases').textContent   = '–';
+    document.getElementById('rpt-penalty').textContent = '–';
+    document.getElementById('rpt-content').innerHTML   =
+      '<div class="rpt-empty">No analysed decisions yet. Run <strong>Run Analyser.bat</strong> first, then return here.</div>';
+    return;
+  }
+
+  // Group by normalised organisation name
+  const orgMap = {};
+  cdAnalysed.forEach(d => {
+    const a   = analysisCache[d.id];
+    const org = (a.organisation || d.title).trim();
+    if (!orgMap[org]) orgMap[org] = [];
+    orgMap[org].push({ d, a });
+  });
+
+  // Keep only orgs with 2+ cases, sort by case count desc then total penalty desc
+  const repeats = Object.entries(orgMap)
+    .filter(([, cases]) => cases.length >= 2)
+    .sort((x, y) => {
+      if (y[1].length !== x[1].length) return y[1].length - x[1].length;
+      const sumPen = arr => arr.reduce((s, {a}) => s + (Number(a.penalty) || 0), 0);
+      return sumPen(y[1]) - sumPen(x[1]);
+    });
+
+  const totalOrgs    = repeats.length;
+  const totalCases   = repeats.reduce((s, [, c]) => s + c.length, 0);
+  const totalPenalty = repeats.reduce((s, [, c]) =>
+    s + c.reduce((p, {a}) => p + (Number(a.penalty) || 0), 0), 0);
+
+  document.getElementById('rpt-orgs').textContent    = totalOrgs || '–';
+  document.getElementById('rpt-cases').textContent   = totalCases || '–';
+  document.getElementById('rpt-penalty').textContent = totalPenalty > 0
+    ? '$' + Number(totalPenalty).toLocaleString() : '–';
+
+  if (repeats.length === 0) {
+    document.getElementById('rpt-content').innerHTML =
+      '<div class="rpt-empty">No repeat offenders found in the current analysed dataset.</div>';
+    return;
+  }
+
+  const cards = repeats.map(([org, cases]) => {
+    const sorted = [...cases].sort((a, b) => dateVal(a.d.date) - dateVal(b.d.date));
+    const totalPen = sorted.reduce((s, {a}) => s + (Number(a.penalty) || 0), 0);
+    const penBadge = totalPen > 0
+      ? `<span style="color:var(--ok);font-weight:600;font-size:12px">Total fines: $${Number(totalPen).toLocaleString()}</span>`
+      : `<span style="color:var(--dim);font-size:12px">No financial penalties</span>`;
+
+    const rows = sorted.map(({d, a}) => {
+      const secs = Array.isArray(a.pdpa_sections) && a.pdpa_sections.length
+        ? a.pdpa_sections.map(s => `<span class="sec-tag">${esc(s)}</span>`).join('')
+        : '<span style="color:var(--dim)">–</span>';
+      const obls = Array.isArray(a.obligations) && a.obligations.length
+        ? a.obligations.join(', ') : '–';
+      const pen  = a.penalty
+        ? `<span class="pen-val">$${Number(a.penalty).toLocaleString()}</span>`
+        : `<span class="pen-val none">–</span>`;
+      return `<div class="rpt-row" style="cursor:pointer" onclick="openDetail(all.find(x=>x.id==='${esc(d.id)}'))">
+        <span class="date">${esc(d.date)}</span>
+        <span class="secs">${secs}</span>
+        <span class="obls">${esc(obls)}</span>
+        <span class="pen">${pen}</span>
+      </div>`;
+    }).join('');
+
+    return `<div class="rpt-card">
+      <div class="rpt-hdr">
+        <span class="rpt-org">${esc(org)}</span>
+        <div style="display:flex;align-items:center;gap:10px">
+          ${penBadge}
+          <span class="rpt-count">${cases.length} cases</span>
+        </div>
+      </div>
+      <div class="rpt-body">
+        <div class="rpt-row" style="background:var(--bg3);font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;cursor:default">
+          <span>Date</span><span>PDPA Sections</span><span>Obligations</span><span style="text-align:right">Penalty</span>
+        </div>
+        ${rows}
+      </div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('rpt-content').innerHTML = `<div class="rpt-grid">${cards}</div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// GO — wait for dynamically-loaded scripts before init
+// ══════════════════════════════════════════════════════════════════
+function waitForData(attempts) {
+  if (typeof PRELOADED_DATA !== 'undefined') {
+    init();
+  } else if (attempts < 60) {
+    setTimeout(function(){ waitForData(attempts + 1); }, 100);
+  } else {
+    // Scripts took too long — proceed anyway (will try live fetch)
+    init();
+  }
+}
+waitForData(0);
+</script>
+</body>
+</html>
