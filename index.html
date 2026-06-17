@@ -1629,12 +1629,15 @@ function renderRepeatOffenders() {
 // GO — wait for dynamically-loaded scripts before init
 // ══════════════════════════════════════════════════════════════════
 function waitForData(attempts) {
-  if (typeof PRELOADED_DATA !== 'undefined') {
+  const dataReady     = typeof PRELOADED_DATA     !== 'undefined';
+  const analysisReady = typeof PRELOADED_ANALYSIS !== 'undefined';
+  if (dataReady && analysisReady) {
     init();
-  } else if (attempts < 60) {
+  } else if (attempts < 150) {
+    // Wait up to 15 s for both scripts (pdpc_analysis.js is ~677 KB)
     setTimeout(function(){ waitForData(attempts + 1); }, 100);
   } else {
-    // Scripts took too long — proceed anyway (will try live fetch)
+    // Timeout — start anyway with whatever is available
     init();
   }
 }
